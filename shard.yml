@@ -1,0 +1,19 @@
+name: athena-session-example
+version: 0.1.0
+
+authors:
+  - Mia
+
+targets:
+  athena-session-example:
+    main: src/athena-session-example.cr
+
+crystal: 1.0.0
+
+license: MIT
+
+dependencies:
+  athena:
+    github: athena-framework/athena
+    version: ~> 0.13.0
+

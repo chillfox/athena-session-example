@@ -39,7 +39,8 @@ SESSION_SECRET = Random::Secure.random_bytes(8).hexstring
 ###########
 
 macro render_view(filename)
-  ECR.render "src/views/#{{{filename}}}.ecr"
+  view = ECR.render "src/views/#{{{filename}}}.ecr"
+  ECR.render "src/views/layout.html.ecr"
 end
 
 ##########
@@ -103,6 +104,12 @@ class SessionStorage
   property session : Session?
 end
 
+######################
+# Custom Annotations #
+######################
+
+ACF.configuration_annotation Secure, admin : Bool? = nil
+
 #############
 # listeners #
 #############
@@ -130,6 +137,32 @@ struct SessionListener
       Log.context.set username: user.username
       @session_storage.user = user
       @session_storage.session = session
+    end
+  end
+end
+
+@[ADI::Register]
+struct SecureListener
+  include AED::EventListenerInterface
+
+  def self.subscribed_events : AED::SubscribedEvents
+    AED::SubscribedEvents{
+      ART::Events::Action => 30,
+    }
+  end
+
+  def initialize(@session_storage : SessionStorage)
+  end
+
+  def call(event : ART::Events::Action, dispatcher : AED::EventDispatcherInterface) : Nil
+    annotations = event.request.action.annotation_configurations
+    return unless annotations.has? Secure
+
+    secure = annotations[Secure]
+    user = @session_storage.user
+    raise ART::Exceptions::Forbidden.new "not logged in" unless user
+    if secure.admin
+      raise ART::Exceptions::Forbidden.new "Not an admin" unless user.admin
     end
   end
 end
@@ -169,7 +202,7 @@ class AuthController < ART::Controller
     session = Session.new user.username
     session.save
     cookie = HTTP::Cookie.new "example_session", session.token
-    ART::RedirectResponse.new "/secret", headers: HTTP::Headers{"Set-Cookie" => cookie.to_cookie_header}
+    ART::RedirectResponse.new "/account", headers: HTTP::Headers{"Set-Cookie" => cookie.to_cookie_header}
   end
 
   @[ARTA::Get("/logout")]
@@ -187,17 +220,23 @@ class AuthController < ART::Controller
 end
 
 @[ADI::Register(public: true)]
-class SecretController < ART::Controller
+class AccountController < ART::Controller
   def initialize(@session : SessionStorage)
   end
 
-  @[ARTA::Get("/secret")]
-  def secret : ART::Response
-    user = @session.user
-    raise ART::Exceptions::Forbidden.new "not logged in" unless user
-    raise ART::Exceptions::Forbidden.new "Not an admin" unless user.admin
+  @[ARTA::Get("/account")]
+  @[Secure]
+  def account : ART::Response
+    @username = @session.user.try &.username || ""
+    html = render_view "account.html"
+    ART::Response.new html, headers: HTTP::Headers{"content-type" => MIME.from_extension(".html")}
+  end
+end
 
-    Log.info { "#{user.username} accessed the secret area" }
+class SecretController < ART::Controller
+  @[ARTA::Get("/secret")]
+  @[Secure(admin: true)]
+  def secret : ART::Response
     html = render_view "secret.html"
     ART::Response.new html, headers: HTTP::Headers{"content-type" => MIME.from_extension(".html")}
   end
